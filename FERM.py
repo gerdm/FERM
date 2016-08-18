@@ -2,7 +2,7 @@ import numpy as np
 from numpy import exp, max, sqrt
 
 class Binomial_Option(object):
-    def __init__(self, S0, r, sigma, n_periods, T, c=0):
+    def __init__(self, S0, r, sigma, n_periods, T, c=0, futures=False):
         self.S0 = np.array([S0])
         self.r = r
         self.sigma = sigma
@@ -11,7 +11,7 @@ class Binomial_Option(object):
         self.c = c
         self.u = exp(sigma * sqrt(T / n_periods))
         self.d = 1 / self.u
-        self.tree = self.stock_tree()       # Stock movement tree
+        self.tree = self.asset_tree(futures=futures) # Stock movement tree, if True, compute futures price
         self.intrinsic_value_tree = []
         self.option_price_tree = None 
         self.present_val_tree = None # Present value for each branch in american options
@@ -28,6 +28,24 @@ class Binomial_Option(object):
             prices = np.append(prices, price_down)
 
         return prices
+
+    def asset_tree(self, futures):
+        """Compute the binomial tree for the asset (the possible paths to take)"""
+        prices_at_nodes = []
+        St = self.S0
+
+        for t in range(0, self.n_periods+1):
+            S_tplus1 = self.binomial_branch(St)
+
+            if futures:
+                futures_factor = self.rate ** (self.n_periods - t)
+                Ft = St * futures_factor
+                prices_at_nodes.append(Ft)
+            else:
+                prices_at_nodes.append(St)
+
+            St =  S_tplus1
+        return prices_at_nodes
     
     def option_price(self, K, form = "call", style = "european"):
         """Compute the price of an option using the binomial model
@@ -36,6 +54,7 @@ class Binomial_Option(object):
         :param style: 'european' or 'american'
         """
         # Calibrating to Black-Scholes
+        # TODO: Finish futures option price
         discount = 1 / self.rate
         q = (self.rate - self.d) / (self.u - self.d)
 
@@ -106,19 +125,6 @@ class Binomial_Option(object):
         return prices
 
 
-    def stock_tree(self):
-        prices_at_nodes = []
-        prices_at_nodes.append(self.S0)
-
-        St = self.S0
-        for t in range(self.n_periods):
-            S_tplus1 = self.binomial_branch(St)
-            prices_at_nodes.append(S_tplus1)
-            St =  S_tplus1
-
-        return prices_at_nodes
-
-    
     def print_tree(self, tree = "option"):
         """Print either the value of the option,
         the intrinsic intrinsic value of the option (if american), 
@@ -130,14 +136,14 @@ class Binomial_Option(object):
         elif tree == "intrinsic":
             selected_tree = self.intrinsic_value_tree
         elif tree == "stock":
-            selected_tree = self.stock_tree()[::-1]
+            selected_tree = self.tree[::-1]
         elif tree == "pv":
             selected_tree = self.present_val_tree
             
         for ix, branch in enumerate(selected_tree[::-1]):
             print_branch = ""
             for leaf in branch:
-                print_branch += "{:>6.2f}"
+                print_branch += "{:>6.1f}"
             print_branch =  "t{:>3}" + print_branch
             print(print_branch.format(ix, *branch[::-1]))
 
