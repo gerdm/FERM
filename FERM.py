@@ -2,7 +2,7 @@ import numpy as np
 from numpy import exp, max, sqrt
 
 class Binomial_Option(object):
-    def __init__(self, S0, r, sigma, n_periods, T, c=0, futures=False):
+    def __init__(self, S0, r, sigma, n_periods, T, c=0, futures=0):
         self.S0 = np.array([S0])
         self.r = r
         self.sigma = sigma
@@ -11,11 +11,12 @@ class Binomial_Option(object):
         self.c = c
         self.u = exp(sigma * sqrt(T / n_periods))
         self.d = 1 / self.u
-        self.tree = self.asset_tree(futures=futures) # Stock movement tree, if True, compute futures price
+        self.futures = futures # The time to maturity of the futures contract (If it exists)
+        self.rate  = exp((self.r - self.c) * (self.T / self.n_periods)) 
+        self.tree = self.asset_tree() # Asset price tree
         self.intrinsic_value_tree = []
         self.option_price_tree = None 
         self.present_val_tree = None # Present value for each branch in american options
-        self.rate  = exp((self.r - self.c) * (self.T / self.n_periods)) 
         
     def binomial_branch(self, S):
         """Compute the up and down movement for
@@ -29,7 +30,7 @@ class Binomial_Option(object):
 
         return prices
 
-    def asset_tree(self, futures):
+    def asset_tree(self):
         """Compute the binomial tree for the asset (the possible paths to take)"""
         prices_at_nodes = []
         St = self.S0
@@ -37,8 +38,8 @@ class Binomial_Option(object):
         for t in range(0, self.n_periods+1):
             S_tplus1 = self.binomial_branch(St)
 
-            if futures:
-                futures_factor = self.rate ** (self.n_periods - t)
+            if self.futures > 0 and self.futures >= t:
+                futures_factor = exp((self.r - self.c) * ((self.futures - t) / self.n_periods)) 
                 Ft = St * futures_factor
                 prices_at_nodes.append(Ft)
             else:
@@ -53,9 +54,13 @@ class Binomial_Option(object):
         :param form: 'call' or 'put'
         :param style: 'european' or 'american'
         """
-        # Calibrating to Black-Scholes
-        # TODO: Finish futures option price
-        discount = 1 / self.rate
+        # Futures are not discounted when computing
+        # their price in the lattice
+        if self.futures > 0:
+            discount = 1
+        else:
+            discount = 1 / self.rate
+
         q = (self.rate - self.d) / (self.u - self.d)
 
         payoffs = {"call": lambda s, k: s - k if s > k else 0,
@@ -135,7 +140,7 @@ class Binomial_Option(object):
             selected_tree = self.option_price_tree
         elif tree == "intrinsic":
             selected_tree = self.intrinsic_value_tree
-        elif tree == "stock":
+        elif tree == "asset":
             selected_tree = self.tree[::-1]
         elif tree == "pv":
             selected_tree = self.present_val_tree
