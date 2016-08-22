@@ -11,12 +11,13 @@ class Binomial_Option(object):
         self.c = c
         self.u = exp(sigma * sqrt(T / n_periods))
         self.d = 1 / self.u
-        self.futures = futures # The time to maturity of the futures contract (If it exists)
+        self.futures = futures # The time to maturity of the futures contract
         self.rate  = exp((self.r - self.c) * (self.T / self.n_periods)) 
         self.tree = self.asset_tree() # Asset price tree
         self.intrinsic_value_tree = []
         self.option_price_tree = None 
         self.present_val_tree = None # Present value for each branch in american options
+        self.price = None
         
     def binomial_branch(self, S):
         """Compute the up and down movement for
@@ -38,8 +39,8 @@ class Binomial_Option(object):
         for t in range(0, self.n_periods+1):
             S_tplus1 = self.binomial_branch(St)
 
-            if self.futures > 0 and self.futures >= t:
-                futures_factor = exp((self.r - self.c) * ((self.futures - t) / self.n_periods)) 
+            if self.futures > 0:
+                futures_factor = exp((self.r - self.c) * (self.T * (self.futures - t) / self.n_periods)) 
                 Ft = St * futures_factor
                 prices_at_nodes.append(Ft)
             else:
@@ -56,20 +57,19 @@ class Binomial_Option(object):
         """
         # Futures are not discounted when computing
         # their price in the lattice
-        if self.futures > 0:
-            discount = 1
-        else:
-            discount = 1 / self.rate
+        discount = exp(-self.r * self.T / self.n_periods)
 
         q = (self.rate - self.d) / (self.u - self.d)
 
+        # Select the type of payoff.
         payoffs = {"call": lambda s, k: s - k if s > k else 0,
                    "put" : lambda s, k: k - s if k > s else 0}
 
         payoffs = np.vectorize(payoffs[form], [np.ndarray])
 
         self.option_price_tree = []
-        # Go backwards!
+
+        ### Go backwards! ###
         payoff = payoffs(self.tree[-1], K)
         self.option_price_tree = [payoff]
         self.present_val_tree = [payoff]
@@ -90,7 +90,7 @@ class Binomial_Option(object):
 
             self.option_price_tree.append(payoff)
 
-        return payoff[0]
+        self.price = payoff[0]
     
     def american_present_value(self, payoffs, discount, q):
         """Present value of an american option at each branch, this is
@@ -99,7 +99,7 @@ class Binomial_Option(object):
         expectations = []
         for i in range(num_expectations):
             # Risk Neutral Expectation
-            EtQ = discount * (payoffs[i] * q + payoffs[i+1] * (1 - q))
+            EtQ = discount * (payoffs[i] * q + payoffs[i + 1] * (1 - q))
             expectations.append(EtQ)
 
         return np.array(expectations)
@@ -119,14 +119,14 @@ class Binomial_Option(object):
         expectations = []
         for i in range(num_expectations):
             # Risk Neutral Expectation
-            EtQ = discount * (payoffs[i] * q + payoffs[i+1] * (1 - q))
+            EtQ = discount * (payoffs[i] * q + payoffs[i + 1] * (1 - q))
             expectations.append(EtQ)
             
         # Set the intrisic value tree for this class
         self.intrinsic_value_tree.append(intrinsic_val)
         
         # Return the max between the payoff at t or the expectation at t
-        prices = np.max([(S, E) for S, E in zip(intrinsic_val, expectations)], axis = 1) 
+        prices = np.max([(S, E) for S, E in zip(intrinsic_val, expectations)], axis=1) 
         return prices
 
 
@@ -142,13 +142,20 @@ class Binomial_Option(object):
             selected_tree = self.intrinsic_value_tree
         elif tree == "asset":
             selected_tree = self.tree[::-1]
-        elif tree == "pv":
+        elif tree == "present":
             selected_tree = self.present_val_tree
             
         for ix, branch in enumerate(selected_tree[::-1]):
             print_branch = ""
             for leaf in branch:
                 print_branch += "{:>6.1f}"
-            print_branch =  "t{:>3}" + print_branch
+            print_branch =  "t:{:>3}" + print_branch
             print(print_branch.format(ix, *branch[::-1]))
 
+if __name__ == "__main__":
+    from FERM import Binomial_Option
+    putF = Binomial_Option(S0=100, r=0.02, sigma=0.30, n_periods=10, T=0.25, c=0.01, futures=10)
+    putF.option_price(K=110, form="call", style="american")
+    putF.print_tree("asset")
+    print()
+    putF.print_tree("option")
