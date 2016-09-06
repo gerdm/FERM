@@ -2,7 +2,7 @@ import numpy as np
 from numpy import exp, max, sqrt
 
 class Binomial_Option(object):
-    def __init__(self, S0, r, sigma, n_periods, T, c=0, futures=0):
+    def __init__(self, S0, r, sigma, n_periods, T, c=0):
         self.S0 = np.array([S0])
         self.r = r
         self.sigma = sigma
@@ -11,9 +11,9 @@ class Binomial_Option(object):
         self.c = c
         self.u = exp(sigma * sqrt(T / n_periods))
         self.d = 1 / self.u
-        self.futures = futures # The time to maturity of the futures contract
-        self.rate  = exp((self.r - self.c) * (self.T / self.n_periods)) 
-        self.tree = self.asset_tree() # Asset price tree
+        self.rate  = exp((self.r - self.c) * (self.T / n_periods)) 
+        self.q = (self.rate - self.d) / (self.u - self.d)
+        self.tree = self.asset_tree(S0, self.n_periods) # Asset price tree
         self.intrinsic_value_tree = []
         self.option_price_tree = None 
         self.present_val_tree = None # Present value for each branch in american options
@@ -31,35 +31,31 @@ class Binomial_Option(object):
 
         return prices
 
-    def asset_tree(self):
+    def asset_tree(self, S0, number_periods):
         """Compute the binomial tree for the asset (the possible paths to take)"""
         prices_at_nodes = []
-        St = self.S0
+        St = np.array([S0])
 
-        for t in range(0, self.n_periods+1):
+        for t in range(0, number_periods + 1):
             S_tplus1 = self.binomial_branch(St)
 
-            if self.futures > 0:
-                futures_factor = exp((self.r - self.c) * (self.T * (self.futures - t) / self.n_periods)) 
-                Ft = St * futures_factor
-                prices_at_nodes.append(Ft)
-            else:
-                prices_at_nodes.append(St)
+            prices_at_nodes.append(St)
 
             St =  S_tplus1
         return prices_at_nodes
     
-    def option_price(self, K, form = "call", style = "european"):
+    def option_price(self, K, form = "call", style = "european", custom_lattice=None):
+        if custom_lattice is None:
+            custom_lattice = self.tree[-1]
+
         """Compute the price of an option using the binomial model
         :param K: strike price
         :param form: 'call' or 'put'
         :param style: 'european' or 'american'
+        :param custom_lattice: The values from which to compute the option (end of the lattice values)
         """
-        # Futures are not discounted when computing
-        # their price in the lattice
-        discount = exp(-self.r * self.T / self.n_periods)
+        discount = 1 / self.rate
 
-        q = (self.rate - self.d) / (self.u - self.d)
 
         # Select the type of payoff.
         payoffs = {"call": lambda s, k: s - k if s > k else 0,
@@ -70,21 +66,20 @@ class Binomial_Option(object):
         self.option_price_tree = []
 
         ### Go backwards! ###
-        payoff = payoffs(self.tree[-1], K)
+        payoff = payoffs(custom_lattice, K)
         self.option_price_tree = [payoff]
         self.present_val_tree = [payoff]
 
-
         for t in range(len(payoff) - 1):
             if style == "european":
-                payoff = self.martingale_expectation(payoff, discount, q)
+                payoff, _ = self.martingale_expectation(payoff, discount, self.q)
 
             elif style == "american":
                 spot = self.tree[-(2 + t)]
                 exercise_at_t = payoffs(spot, K)
-                pv = self.american_present_value(payoff, discount, q)
-                payoff = self.martingale_expectation(payoff, discount, 
-                                                     q, intrinsic_val=exercise_at_t)
+
+                payoff, pv = self.martingale_expectation(payoff, discount, 
+                                                     self.q, intrinsic_val=exercise_at_t)
                 self.present_val_tree.append(pv)
 
 
@@ -92,34 +87,29 @@ class Binomial_Option(object):
 
         self.price = payoff[0]
     
-    def american_present_value(self, payoffs, discount, q):
-        """Present value of an american option at each branch, this is
-        not the price of the option."""
-        num_expectations = len(payoffs) - 1
-        expectations = []
-        for i in range(num_expectations):
-            # Risk Neutral Expectation
-            EtQ = discount * (payoffs[i] * q + payoffs[i + 1] * (1 - q))
-            expectations.append(EtQ)
-
-        return np.array(expectations)
-
     def martingale_expectation(self, payoffs, discount, q, intrinsic_val=None):
         """Given an array of values, compute the european or
-        american price (martingale) of the option
-        :param intrinsic_val:the possible payoff one period before,
-                             if not specified, then an european option
-                             is computed by replacing all possible 
-                             payoffs with 0"""
+        american price (martingale) of the option.
+        :param intrinsic_val: the possible payoff during the current period,
+                              if not specified, then an european option
+                              is computed by replacing all possible 
+                              payoffs with 0"""
 
         num_expectations = len(payoffs) - 1
 
         if intrinsic_val is None: intrinsic_val = np.repeat(0, num_expectations)
 
         expectations = []
+        american_pv_list = []
         for i in range(num_expectations):
+
             # Risk Neutral Expectation
-            EtQ = discount * (payoffs[i] * q + payoffs[i + 1] * (1 - q))
+            expectation_discount = discount
+
+            EtQ = expectation_discount * (payoffs[i] * q + payoffs[i + 1] * (1 - q))
+            american_pv = discount * (payoffs[i] * q + payoffs[i + 1] * (1 - q))
+
+            american_pv_list.append(american_pv)
             expectations.append(EtQ)
             
         # Set the intrisic value tree for this class
@@ -127,7 +117,24 @@ class Binomial_Option(object):
         
         # Return the max between the payoff at t or the expectation at t
         prices = np.max([(S, E) for S, E in zip(intrinsic_val, expectations)], axis=1) 
-        return prices
+        return prices, american_pv_list
+
+    def futures_option(K, form, style, time_maturity):
+        pass
+
+
+    def optimal_early_exercise(self):
+        """Return the earliest optimal time to exercise the option
+        if said option is american"""
+        # The payoff if an early excercise happens
+        intrinsic = np.array(self.intrinsic_value_tree)[::-1]
+        # Discounted Martingale Expectation
+        present_value = np.array(self.present_val_tree[1:])[::-1]
+
+        # Iterate through time
+        for t, (payoff, p_value) in enumerate(zip(intrinsic, present_value)):
+            if np.any(payoff >= p_value):
+                return t
 
 
     def print_tree(self, tree = "option"):
@@ -140,7 +147,7 @@ class Binomial_Option(object):
             selected_tree = self.option_price_tree
         elif tree == "intrinsic":
             selected_tree = self.intrinsic_value_tree
-        elif tree == "asset":
+        elif tree == "underlying":
             selected_tree = self.tree[::-1]
         elif tree == "present":
             selected_tree = self.present_val_tree
@@ -152,10 +159,3 @@ class Binomial_Option(object):
             print_branch =  "t:{:>3}" + print_branch
             print(print_branch.format(ix, *branch[::-1]))
 
-if __name__ == "__main__":
-    from FERM import Binomial_Option
-    putF = Binomial_Option(S0=100, r=0.02, sigma=0.30, n_periods=10, T=0.25, c=0.01, futures=10)
-    putF.option_price(K=110, form="call", style="american")
-    putF.print_tree("asset")
-    print()
-    putF.print_tree("option")
