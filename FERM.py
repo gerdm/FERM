@@ -46,7 +46,7 @@ class Binomial_Option(object):
     
     def option_price(self, K, form = "call", style = "european", custom_lattice=None):
         if custom_lattice is None:
-            custom_lattice = self.tree[-1]
+            custom_lattice = self.tree
 
         """Compute the price of an option using the binomial model
         :param K: strike price
@@ -66,7 +66,7 @@ class Binomial_Option(object):
         self.option_price_tree = []
 
         ### Go backwards! ###
-        payoff = payoffs(custom_lattice, K)
+        payoff = payoffs(custom_lattice[-1], K)
         self.option_price_tree = [payoff]
         self.present_val_tree = [payoff]
 
@@ -75,7 +75,7 @@ class Binomial_Option(object):
                 payoff, _ = self.martingale_expectation(payoff, discount, self.q)
 
             elif style == "american":
-                spot = self.tree[-(2 + t)]
+                spot = custom_lattice[-(2 + t)]
                 exercise_at_t = payoffs(spot, K)
 
                 payoff, pv = self.martingale_expectation(payoff, discount, 
@@ -119,9 +119,18 @@ class Binomial_Option(object):
         prices = np.max([(S, E) for S, E in zip(intrinsic_val, expectations)], axis=1) 
         return prices, american_pv_list
 
-    def futures_option(K, form, style, time_maturity):
-        pass
+    def futures_option(self, K, fform, fstyle, time_maturity):
+        spot_lattice = self.tree[-1]
+        futures_lattice = []
+        # Discount down to the end of the maturity contract and then 
+        # save this futures' price lattice 
+        for t in range(self.n_periods):
+            spot_lattice, _ = self.martingale_expectation(spot_lattice, 1, self.q)
+            # Start saving to the futures' lattice once it hits its maturity
+            if t >= (self.n_periods - time_maturity - 1):
+                futures_lattice.append(np.array(spot_lattice))
 
+        futures_price = self.option_price(K, form=fform, style=fstyle, custom_lattice=futures_lattice[::-1])
 
     def optimal_early_exercise(self):
         """Return the earliest optimal time to exercise the option
