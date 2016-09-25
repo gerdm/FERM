@@ -1,6 +1,53 @@
 import numpy as np
 from numpy import exp, max, sqrt
 
+#TODO: Recode: place shared method accross binomial models inside 'Binomial_Model'
+class Binomial_Models(object):
+    def __init__(self, u, d, S0, n_periods):
+        self.u = u
+        self.d = d
+        self.S0 = S0
+        self.tree = self.asset_tree(S0, n_periods)
+
+    
+    def binomial_branch(self, S):
+        """Compute the up and down movement for
+        a given stock price"""
+        prices = S[0] * np.array([self.u, self.d])
+        nodes_left = range(len(S) - 1)
+
+        for n in nodes_left:
+            price_down = S[n+1] * self.d
+            prices = np.append(prices, price_down)
+
+        return prices
+
+    def asset_tree(self, S0, number_periods):
+        """Compute the binomial tree for the asset (the possible paths to take)"""
+        prices_at_nodes = []
+        St = np.array([S0])
+
+        for t in range(0, number_periods + 1):
+            S_tplus1 = self.binomial_branch(St)
+
+            prices_at_nodes.append(St)
+
+            St =  S_tplus1
+        return prices_at_nodes
+    
+    def print_tree(self, tree = "option"):
+        """Print either the value of the option,
+        the intrinsic intrinsic value of the option (if american), 
+        or the stock price assumed
+        tree: either 'option', 'intrinsic' or 'stock'"""
+        for ix, branch in enumerate(self.tree):
+            print_branch = ""
+            for leaf in branch:
+                print_branch += "{:>6.3f}"
+            print_branch =  "t:{:>3}" + print_branch
+            print(print_branch.format(ix, *branch[::-1]))
+    
+
 class Binomial_Option(object):
     def __init__(self, S0, r, sigma, n_periods, T, c=0):
         self.S0 = np.array([S0])
@@ -145,26 +192,28 @@ class Binomial_Option(object):
             if np.any(payoff >= p_value):
                 return t
 
+class Term_Structure(object):
+    """Class to price securities under a Term Structure Lattice Model"""
+    def __init__(self, r00, up, down, q_up):
+        self.r00 = r00
+        # Up and down factors
+        self.up = up
+        self.down = down
+        # Up and down (flat) probabilities
+        sef.q_up =  q_up
+        self.q_down = 1 - q_up
 
-    def print_tree(self, tree = "option"):
-        """Print either the value of the option,
-        the intrinsic intrinsic value of the option (if american), 
-        or the stock price assumed
-        tree: either 'option', 'intrinsic' or 'stock'"""
-        selected_tree = None
-        if tree == "option":
-            selected_tree = self.option_price_tree
-        elif tree == "intrinsic":
-            selected_tree = self.intrinsic_value_tree
-        elif tree == "underlying":
-            selected_tree = self.tree[::-1]
-        elif tree == "present":
-            selected_tree = self.present_val_tree
-            
-        for ix, branch in enumerate(selected_tree[::-1]):
-            print_branch = ""
-            for leaf in branch:
-                print_branch += "{:>6.1f}"
-            print_branch =  "t:{:>3}" + print_branch
-            print(print_branch.format(ix, *branch[::-1]))
+    def make_short_rate_lattice(self):
+        pass
 
+    def price_zcb(self):
+        pass
+
+    def price_forward(self):
+        pass
+
+    def price_futures(self):
+        pass
+
+    def price_swap(self):
+        pass
