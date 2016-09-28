@@ -1,12 +1,12 @@
 import numpy as np
 from numpy import exp, max, sqrt
 
-#TODO: Recode: place shared method accross binomial models inside 'Binomial_Model'
 class Binomial_Models(object):
     def __init__(self, u, d, S0, n_periods):
         self.u = u
         self.d = d
         self.S0 = S0
+        self.n_periods = n_periods
         self.tree = self.asset_tree(S0, n_periods)
 
     
@@ -48,49 +48,24 @@ class Binomial_Models(object):
             print(print_branch.format(ix, *branch[::-1]))
     
 
-class Binomial_Option(object):
+class Binomial_Option(Binomial_Models):
     def __init__(self, S0, r, sigma, n_periods, T, c=0):
+        u = exp(sigma * sqrt(T / n_periods))
+        d = 1/u
+
         self.S0 = np.array([S0])
         self.r = r
         self.sigma = sigma
-        self.n_periods = n_periods
         self.T = T
-        self.c = c
-        self.u = exp(sigma * sqrt(T / n_periods))
-        self.d = 1 / self.u
+        self.c = c # dividends 
         self.rate  = exp((self.r - self.c) * (self.T / n_periods)) 
-        self.q = (self.rate - self.d) / (self.u - self.d)
-        self.tree = self.asset_tree(S0, self.n_periods) # Asset price tree
+        self.q = (self.rate - d) / (u - d)
         self.intrinsic_value_tree = []
         self.option_price_tree = None 
         self.present_val_tree = None # Present value for each branch in american options
         self.price = None
+        Binomial_Models.__init__(self, u, d, S0, n_periods)
         
-    def binomial_branch(self, S):
-        """Compute the up and down movement for
-        a given stock price"""
-        prices = S[0] * np.array([self.u, self.d])
-        nodes_left = range(len(S) - 1)
-
-        for n in nodes_left:
-            price_down = S[n+1] * self.d
-            prices = np.append(prices, price_down)
-
-        return prices
-
-    def asset_tree(self, S0, number_periods):
-        """Compute the binomial tree for the asset (the possible paths to take)"""
-        prices_at_nodes = []
-        St = np.array([S0])
-
-        for t in range(0, number_periods + 1):
-            S_tplus1 = self.binomial_branch(St)
-
-            prices_at_nodes.append(St)
-
-            St =  S_tplus1
-        return prices_at_nodes
-    
     def option_price(self, K, form = "call", style = "european", custom_lattice=None):
         if custom_lattice is None:
             custom_lattice = self.tree
@@ -192,16 +167,13 @@ class Binomial_Option(object):
             if np.any(payoff >= p_value):
                 return t
 
-class Term_Structure(object):
+class Term_Structure(Binomial_Models):
     """Class to price securities under a Term Structure Lattice Model"""
-    def __init__(self, r00, up, down, q_up):
-        self.r00 = r00
-        # Up and down factors
-        self.up = up
-        self.down = down
+    def __init__(self, r00, up, down, q_up, n_periods):
         # Up and down (flat) probabilities
-        sef.q_up =  q_up
+        self.q_up =  q_up
         self.q_down = 1 - q_up
+        Binomial_Models.__init__(self, up, down, r00, n_periods)
 
     def make_short_rate_lattice(self):
         pass
