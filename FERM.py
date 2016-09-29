@@ -2,51 +2,29 @@ import numpy as np
 from numpy import exp, max, sqrt
 
 class Binomial_Models(object):
+    """Core Module for all the Binomial Models"""
     def __init__(self, u, d, S0, n_periods):
         self.u = u
         self.d = d
         self.S0 = S0
-        self.n_periods = n_periods
-        self.tree = self.asset_tree(S0, n_periods)
-
+        self.n_periods = n_periods + 1
+        self.tree = self.asset_tree(S0, self.n_periods)
     
-    def binomial_branch(self, S):
-        """Compute the up and down movement for
-        a given stock price"""
-        prices = S[0] * np.array([self.u, self.d])
-        nodes_left = range(len(S) - 1)
+    def asset_tree(self, s0, n):
+        """Return Forward filling of a binomial model,
+        given up and down parameters. The first value of the tree
+        is given by the (n, n) entry of the matrix. A down move is 
+        move in the matrix and an up move a
+        (the tree should be read backwards)"""
+        tree = np.zeros((n, n))
+        tree[0, 0] = self.S0
 
-        for n in nodes_left:
-            price_down = S[n+1] * self.d
-            prices = np.append(prices, price_down)
+        for row in range(n):
+            for col in range(row, n):
+                tree[row, col] = tree[0, 0] * (self.u ** row) * (self.d ** (col - row))
 
-        return prices
+        return np.rot90(tree, k=2)
 
-    def asset_tree(self, S0, number_periods):
-        """Compute the binomial tree for the asset (the possible paths to take)"""
-        prices_at_nodes = []
-        St = np.array([S0])
-
-        for t in range(0, number_periods + 1):
-            S_tplus1 = self.binomial_branch(St)
-
-            prices_at_nodes.append(St)
-
-            St =  S_tplus1
-        return prices_at_nodes
-    
-    def print_tree(self, tree = "option"):
-        """Print either the value of the option,
-        the intrinsic intrinsic value of the option (if american), 
-        or the stock price assumed
-        tree: either 'option', 'intrinsic' or 'stock'"""
-        for ix, branch in enumerate(self.tree):
-            print_branch = ""
-            for leaf in branch:
-                print_branch += "{:>6.3f}"
-            print_branch =  "t:{:>3}" + print_branch
-            print(print_branch.format(ix, *branch[::-1]))
-    
 
 class Binomial_Option(Binomial_Models):
     def __init__(self, S0, r, sigma, n_periods, T, c=0):
@@ -175,11 +153,27 @@ class Term_Structure(Binomial_Models):
         self.q_down = 1 - q_up
         Binomial_Models.__init__(self, up, down, r00, n_periods)
 
-    def make_short_rate_lattice(self):
-        pass
+    def price_zcb(self,principal, time_to_maturity):
+        price_start = self.n_periods - (time_to_maturity + 1)
+        zcb_tree = np.zeros((self.n_periods, self.n_periods))
+        zcb_tree[price_start:,price_start] = principal
 
-    def price_zcb(self):
-        pass
+        for t in range(price_start + 1, self.n_periods):
+            for i in range(t, self.n_periods):
+               # Discounted Martignale Expectation for the model
+                zcb_tree[i, t] = (zcb_tree[i-1, t-1] * self.q_up + zcb_tree[i, t-1] * self.q_down)
+                zcb_tree[i, t] /= (1 + self.tree[i, t])
+
+        return zcb_tree
+
+    def make_term_structure(self):
+        """Estimate the term structure for a zcb with principal $1"""
+        number_rates = self.n_periods - 1
+        term_structure = np.zeros(number_rates)
+        for t in range(number_rates, 0, -1):
+            term_structure[t-1] = self.price_zcb(1, t)[number_rates, number_rates]
+
+        return term_structure
 
     def price_forward(self):
         pass
