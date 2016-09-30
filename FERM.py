@@ -145,41 +145,70 @@ class Binomial_Option(Binomial_Models):
             if np.any(payoff >= p_value):
                 return t
 
-class Term_Structure(Binomial_Models):
+class Term_Structure_Model(Binomial_Models):
     """Class to price securities under a Term Structure Lattice Model"""
-    def __init__(self, r00, up, down, q_up, n_periods):
+    def __init__(self, r00, up, down, n_periods, q_up=1/2):
         # Up and down (flat) probabilities
         self.q_up =  q_up
         self.q_down = 1 - q_up
         Binomial_Models.__init__(self, up, down, r00, n_periods)
+        self.rate_structure = self.make_term_structure()
 
-    def price_zcb(self,principal, time_to_maturity):
+    def price_bond(self, principal, time_to_maturity, coupon=0.0):
+        """Non-Deterministic price of a bond
+        :return: binomial lattice; (n,n) being the price of the bond"""
         price_start = self.n_periods - (time_to_maturity + 1)
         zcb_tree = np.zeros((self.n_periods, self.n_periods))
-        zcb_tree[price_start:,price_start] = principal
+        zcb_tree[price_start:,price_start] = principal * (1 + coupon)
 
         for t in range(price_start + 1, self.n_periods):
             for i in range(t, self.n_periods):
                # Discounted Martignale Expectation for the model
                 zcb_tree[i, t] = (zcb_tree[i-1, t-1] * self.q_up + zcb_tree[i, t-1] * self.q_down)
                 zcb_tree[i, t] /= (1 + self.tree[i, t])
+                # Certain Coupon Payment
+                if coupon > 0:
+                    zcb_tree[i, t] += principal * coupon
 
         return zcb_tree
 
     def make_term_structure(self):
-        """Estimate the term structure for a zcb with principal $1"""
+        """Estimate the term structure for a zcb with principal $1.
+        :returns: a the term structure for a zcb maturing from 1 to n"""
         number_rates = self.n_periods - 1
         term_structure = np.zeros(number_rates)
         for t in range(number_rates, 0, -1):
-            term_structure[t-1] = self.price_zcb(1, t)[number_rates, number_rates]
+            term_structure[t-1] = self.price_bond(1, t)[number_rates, number_rates]
 
         return term_structure
 
-    def price_forward(self):
-        pass
+    def price_forward(self, principal, delivery, coupon=0.0):
+        if delivery <= 0:
+            raise ValueError("Forwards can only be priced for future delivery times.")
+        terms = self.n_periods - 1
+        bond_lattice = self.price_bond(principal, terms, coupon)
+        # Values from which to compute the forward of the bond *after* coupon
+        # This is the time of delivery
+        where = terms - delivery
+        value_after_coupon = bond_lattice[where:, where] - principal * coupon
+        # Expectation of the discounted bond at time to delivery
+        EZtB = self.price_bond(value_after_coupon, delivery)[terms, terms]
+        # Price of a $1 ZCB at t = delivery
+        EB =  self.rate_structure[delivery - 1]
 
-    def price_futures(self):
-        pass
+        return  EZtB / EB
+
+    def price_futures(self, principal, delivery, coupon=0.0):
+        if delivery <= 0:
+            raise ValueError("Forwards can only be priced for future delivery times.")
+        terms = self.n_periods - 1
+        bond_lattice = self.price_bond(principal, terms, coupon)
+        # Values from which to compute the forward of the bond *after* coupon
+        # This is the time of delivery
+        where = terms - delivery
+        value_after_coupon = bond_lattice[where:, where] - principal * coupon
+        # Expectation of the discounted bond at time to delivery
+        return self.price_bond(value_after_coupon, delivery)
 
     def price_swap(self):
         pass
