@@ -25,8 +25,7 @@ class Binomial_Models(object):
 
         return np.rot90(tree, k=2)
 
-
-class Binomial_Option(Binomial_Models):
+class Black_Scholes_Binomial(Binomial_Models):
     def __init__(self, S0, r, sigma, n_periods, T, c=0):
         u = exp(sigma * sqrt(T / n_periods))
         d = 1/u
@@ -44,7 +43,7 @@ class Binomial_Option(Binomial_Models):
         self.price = None
         Binomial_Models.__init__(self, u, d, S0, n_periods)
         
-    def option_price(self, K, form = "call", style = "european", custom_lattice=None):
+    def option_price(self, K, form="call", style="european", custom_lattice=None):
         if custom_lattice is None:
             custom_lattice = self.tree
 
@@ -152,12 +151,15 @@ class Term_Structure_Model(Binomial_Models):
         self.q_up =  q_up
         self.q_down = 1 - q_up
         Binomial_Models.__init__(self, up, down, r00, n_periods)
+        self.n_years = self.n_periods - 1
         self.rate_structure = self.make_term_structure()
-
-    def price_bond(self, principal, time_to_maturity, coupon=0.0):
+        
+    # TODO: rename to 'backwards_pricing'; fix all dependencies
+    def price_bond(self, principal, time_to_maturity, coupon=0.0, apply_func=None):
         """Non-Deterministic price of a bond
+        present_value_exp: if False, the expectation is computed without a present value 
         :return: binomial lattice; (n,n) being the price of the bond"""
-        price_start = self.n_periods - (time_to_maturity + 1)
+        price_start = self.n_years - time_to_maturity
         zcb_tree = np.zeros((self.n_periods, self.n_periods))
         zcb_tree[price_start:,price_start] = principal * (1 + coupon)
 
@@ -166,49 +168,91 @@ class Term_Structure_Model(Binomial_Models):
                # Discounted Martignale Expectation for the model
                 zcb_tree[i, t] = (zcb_tree[i-1, t-1] * self.q_up + zcb_tree[i, t-1] * self.q_down)
                 zcb_tree[i, t] /= (1 + self.tree[i, t])
+                # Pass a function to apply at that node
+                if apply_func is not None:
+                    zcb_tree[i, t] = apply_func(zcb_tree[i, t], i, t)
                 # Certain Coupon Payment
                 if coupon > 0:
                     zcb_tree[i, t] += principal * coupon
 
         return zcb_tree
 
-    def make_term_structure(self):
-        """Estimate the term structure for a zcb with principal $1.
-        :returns: a the term structure for a zcb maturing from 1 to n"""
-        number_rates = self.n_periods - 1
-        term_structure = np.zeros(number_rates)
-        for t in range(number_rates, 0, -1):
-            term_structure[t-1] = self.price_bond(1, t)[number_rates, number_rates]
-
-        return term_structure
-
-    def price_forward(self, principal, delivery, coupon=0.0):
+    def path_after_coupon(self, principal, delivery, coupon):
+        """Compute the possible values that a security could take
+        for all possible trayectories in a given number of periods
+        after a certain coupon has been paid"""
         if delivery <= 0:
-            raise ValueError("Forwards can only be priced for future delivery times.")
+            raise ValueError("Forwards and Futures can only be priced for future delivery times.")
         terms = self.n_periods - 1
         bond_lattice = self.price_bond(principal, terms, coupon)
         # Values from which to compute the forward of the bond *after* coupon
         # This is the time of delivery
-        where = terms - delivery
+        where = terms - delivery 
         value_after_coupon = bond_lattice[where:, where] - principal * coupon
+        return value_after_coupon
+
+    def make_term_structure(self):
+        """Estimate the term structure for a zcb with principal $1.
+        :returns: a the term structure for a zcb maturing from 1 to n"""
+        number_rates = self.n_periods - 1
+        term_structure = np.zeros(self.n_years)
+        for t in range(self.n_years, 0, -1):
+            term_structure[t-1] = self.price_bond(1, t)[self.n_years, self.n_years]
+
+        return term_structure
+
+    def price_forward(self, principal, delivery, coupon=0.0):
+        """Price of a bond forward.
+        :param principal: the value of the bond after 'n_periods' years
+        :param delivery: Year of bond delivery
+        :param coupon: Percentage of the principal to pay with certainty"""
+        value_after_coupon = self.path_after_coupon(principal, delivery, coupon)
         # Expectation of the discounted bond at time to delivery
-        EZtB = self.price_bond(value_after_coupon, delivery)[terms, terms]
+        terms = self.n_periods - 1
+        EZtB = self.price_bond(value_after_coupon, delivery)[self.n_years, self.n_years]
         # Price of a $1 ZCB at t = delivery
         EB =  self.rate_structure[delivery - 1]
 
         return  EZtB / EB
 
     def price_futures(self, principal, delivery, coupon=0.0):
-        if delivery <= 0:
-            raise ValueError("Forwards can only be priced for future delivery times.")
-        terms = self.n_periods - 1
-        bond_lattice = self.price_bond(principal, terms, coupon)
-        # Values from which to compute the forward of the bond *after* coupon
-        # This is the time of delivery
-        where = terms - delivery
-        value_after_coupon = bond_lattice[where:, where] - principal * coupon
-        # Expectation of the discounted bond at time to delivery
-        return self.price_bond(value_after_coupon, delivery)
+        value_after_coupon = self.path_after_coupon(principal, delivery, coupon)
+        # Expectation of non-discounted, after bond futures payoff
+        no_discount = lambda node, i, t: node * (1 + self.tree[i, t])
+        futures_tree = self.price_bond(value_after_coupon, delivery, apply_func=no_discount)
+        return futures_tree[self.n_years, self.n_years]
+
+    def price_option(self, principal, K, delivery, maturity, style="call", flavor="european", coupon=0.0):
+        rcloc = self.n_years - delivery
+        if style == "call":
+            target = 1
+        elif style == "put":
+            target = -1
+        else:
+            raise ValueError("{} not supported".format(flavor))
+
+        # Function to price the american option
+        def american_backwards(node, i, t):
+            node_payoff = target * (bond_tree[i, t] - K)
+            if node_payoff > node:
+                return node_payoff
+            else:
+                return node
+
+        # Possible payoffs at delivery time
+        payoffs = target * (self.price_bond(principal, maturity)[rcloc:, rcloc] - K)
+        payoffs = np.maximum(payoffs, 0)
+        # Backwards pricing the possible payoffs, getting the relevant matrix
+        lim = self.n_years - delivery
+        option_tree = self.price_bond(payoffs, delivery)[lim:, lim:]
+    
+        if flavor == "european":
+            return option_tree.ravel()[-1]
+        elif flavor == "american":
+            bond_tree = self.price_bond(principal, maturity)
+            option_tree = self.price_bond(option_tree[:, 0], delivery, apply_func=american_backwards)
+            return option_tree
+            
 
     def price_swap(self):
         pass
