@@ -251,8 +251,18 @@ class Term_Structure_Model(Binomial_Models):
         elif flavor == "american":
             bond_tree = self.price_bond(principal, maturity)
             option_tree = self.price_bond(option_tree[:, 0], delivery, apply_func=american_backwards)
-            return option_tree
-            
+            return option_tree.ravel()[-1]
 
-    def price_swap(self):
-        pass
+    def price_swap(self, krate, payment="fixed"):
+        payoffs = (self.tree[:, 0] - krate) / (1 + self.tree[:, 0])
+        def swap_flow(node, i, t):
+            # Remove Discount
+            swap_node = node * (1 + self.tree[i, t])
+            # Add future payment
+            swap_node += self.tree[i, t] - krate
+            # discount back
+            swap_node /= (1 + self.tree[i, t])
+
+            return swap_node
+
+        return self.price_bond(payoffs, self.n_years, apply_func=swap_flow)
