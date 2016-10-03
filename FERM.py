@@ -150,6 +150,7 @@ class Term_Structure_Model(Binomial_Models):
         # Up and down (flat) probabilities
         self.q_up =  q_up
         self.q_down = 1 - q_up
+        self.r00 = r00
         Binomial_Models.__init__(self, up, down, r00, n_periods)
         self.n_years = self.n_periods - 1
         self.rate_structure = self.make_term_structure()
@@ -253,7 +254,8 @@ class Term_Structure_Model(Binomial_Models):
             option_tree = self.price_bond(option_tree[:, 0], delivery, apply_func=american_backwards)
             return option_tree.ravel()[-1]
 
-    def price_swap(self, krate, payment="fixed"):
+    # TODO; Add floating payment, add 'future' pricing
+    def price_swap(self, krate, start=0, payment="fixed"):
         payoffs = (self.tree[:, 0] - krate) / (1 + self.tree[:, 0])
         def swap_flow(node, i, t):
             # Remove Discount
