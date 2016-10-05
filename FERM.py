@@ -25,6 +25,9 @@ class Binomial_Models(object):
 
         return np.rot90(tree, k=2)
 
+    def elementary_prices_tree(self):
+        pass
+
 class Black_Scholes_Binomial(Binomial_Models):
     def __init__(self, S0, r, sigma, n_periods, T, c=0):
         u = exp(sigma * sqrt(T / n_periods))
