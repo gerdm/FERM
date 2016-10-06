@@ -8,6 +8,7 @@ class Binomial_Models(object):
         self.d = d
         self.S0 = S0
         self.n_periods = n_periods + 1
+        self.years = n_periods
         self.tree = self.asset_tree(S0, self.n_periods)
     
     def asset_tree(self, s0, n):
@@ -25,8 +26,46 @@ class Binomial_Models(object):
 
         return np.rot90(tree, k=2)
 
+    def forward_equations(self, time, state, fwd_tree):
+        # TODO: fix bug computation
+        pk1 = 1
+        if not(time == state == 0):
+            # Fwd Eq. at bottom of tree
+            if state == 0: 
+                p0k = fwd_tree[state, time-1]
+                r0k = self.tree[self.years - state, self.years - time + 1]
+
+                pk1 = p0k / (1 + r0k) * 0.5
+            # Fwd Eq. at the top of the tree
+            if state == time:
+                p1k = fwd_tree[state - 1, time - 1]
+                r1k = self.tree[self.years - state + 1, self.years - time + 1]
+
+                pk1 = p1k / (1 + r1k) * 0.5
+                
+            # Fwd Eq. Inbetween the tree
+            else:
+                pdown = fwd_tree[state, time-1]
+                rdown = self.tree[self.years - state, self.years - time + 1]
+
+                pup = fwd_tree[state - 1, time - 1]
+                rup = self.tree[self.n_periods - state + 1, self.n_periods - time + 1]
+
+                pk1 = pdown / (1 + rdown) * 0.5 + pup / (1 + rup) * 0.5
+
+        return pk1
+
     def elementary_prices_tree(self):
-        pass
+        tree = np.zeros((self.n_periods, self.n_periods))
+        p00 = 1
+        tree[0, 0] = p00
+
+        for time in range(self.n_periods):
+            for state in range(time + 1):
+                tree[state, time] = self.forward_equations(time, state, tree)
+
+        return tree
+
 
 class Black_Scholes_Binomial(Binomial_Models):
     def __init__(self, S0, r, sigma, n_periods, T, c=0):
