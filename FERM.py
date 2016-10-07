@@ -27,7 +27,6 @@ class Binomial_Models(object):
         return np.rot90(tree, k=2)
 
     def forward_equations(self, time, state, fwd_tree):
-        # TODO: fix bug computation
         pk1 = 1
         if not(time == state == 0):
             # Fwd Eq. at bottom of tree
@@ -36,8 +35,9 @@ class Binomial_Models(object):
                 r0k = self.tree[self.years - state, self.years - time + 1]
 
                 pk1 = p0k / (1 + r0k) * 0.5
+
             # Fwd Eq. at the top of the tree
-            if state == time:
+            elif state == time:
                 p1k = fwd_tree[state - 1, time - 1]
                 r1k = self.tree[self.years - state + 1, self.years - time + 1]
 
@@ -49,13 +49,16 @@ class Binomial_Models(object):
                 rdown = self.tree[self.years - state, self.years - time + 1]
 
                 pup = fwd_tree[state - 1, time - 1]
-                rup = self.tree[self.n_periods - state + 1, self.n_periods - time + 1]
+                rup = self.tree[self.years - state + 1, self.years - time + 1]
 
                 pk1 = pdown / (1 + rdown) * 0.5 + pup / (1 + rup) * 0.5
 
         return pk1
 
     def elementary_prices_tree(self):
+        """Compute the elementary securities' tree using the
+        forward equations.
+        :returns: an (n,n) matrix of the forward equations"""
         tree = np.zeros((self.n_periods, self.n_periods))
         p00 = 1
         tree[0, 0] = p00
@@ -64,7 +67,7 @@ class Binomial_Models(object):
             for state in range(time + 1):
                 tree[state, time] = self.forward_equations(time, state, tree)
 
-        return tree
+        return np.flipud(tree)
 
 
 class Black_Scholes_Binomial(Binomial_Models):
@@ -296,7 +299,7 @@ class Term_Structure_Model(Binomial_Models):
             option_tree = self.price_bond(option_tree[:, 0], delivery, apply_func=american_backwards)
             return option_tree.ravel()[-1]
 
-    # TODO; Add floating payment, add 'future' pricing
+    # TODO; Add floating payment; add 'future' pricing
     def price_swap(self, krate, start=0, payment="fixed"):
         payoffs = (self.tree[:, 0] - krate) / (1 + self.tree[:, 0])
         def swap_flow(node, i, t):
